@@ -3,9 +3,9 @@
 function(p) {
   // Storing constants.
 
-  local bert_base_dim = 768,
+  local longformer_base_dim = 768,
   local lstm_hidden_size = 200,
-  local token_embedding_dim = bert_base_dim,
+  local token_embedding_dim = longformer_base_dim,
   local context_encoder_dim = 2 * lstm_hidden_size,
   local endpoint_span_embedding_dim = 2 * context_encoder_dim,
   local attended_span_embedding_dim = context_encoder_dim,
@@ -32,9 +32,9 @@ function(p) {
   },
 
   local token_indexers = {
-    bert: {
-      type: "bert-pretrained",
-      pretrained_model: std.extVar("BERT_VOCAB"),
+    longformer : {
+      type: "longformer-pretrained",
+      pretrained_model: std.extVar("LONGFORMER_VOCAB"),
       do_lowercase: std.extVar("IS_LOWERCASE"),
       use_starting_offsets: true,
       truncate_long_sequences : false
@@ -43,13 +43,13 @@ function(p) {
   local text_field_embedder = {
       allow_unmatched_keys: true,
       embedder_to_indexer_map: {
-        bert: ["bert", "bert-offsets"],
+        longformer: ["longformer", "longformer-offsets"],
       },
       token_embedders : {
-        bert: {
-            type: "bert-pretrained-modified",
-            pretrained_model: std.extVar("BERT_WEIGHTS"),
-            requires_grad: p.bert_fine_tune,
+        longformer: {
+            type: "longformer-pretrained",
+            pretrained_model: std.extVar("LONGFORMER_WEIGHTS"),
+            requires_grad: p.longformer_fine_tune,
         },
     }
   },
@@ -117,7 +117,7 @@ function(p) {
       type: "adam",
       lr: 1e-3,
       parameter_groups :[
-        [[".*bert_model.*"], {"lr": 2e-5}], 
+        [[".*longformer_model.*"], {"lr": 2e-5}], 
       ]
     },
     num_serialized_models_to_keep: 1,

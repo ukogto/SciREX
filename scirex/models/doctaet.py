@@ -6,7 +6,7 @@ from allennlp.models.model import Model
 from allennlp.nn import RegularizerApplicator
 from allennlp.modules import FeedForward
 from allennlp.nn.initializers import InitializerApplicator
-from scirex.models.bert_token_embedder_modified import PretrainedBertEmbedder
+from scirex.models.longformer_token_embedder import PretrainedLongformerEmbedder
 
 from scirex.metrics.thresholding_f1_metric import BinaryThresholdF1
 
@@ -16,7 +16,7 @@ class DoctaetModel(Model):
     def __init__(
         self,
         vocab: Vocabulary,
-        bert_model: PretrainedBertEmbedder,
+        bert_model: PretrainedLongformerEmbedder,
         aggregate_feedforward: FeedForward,
         dropout: float = 0.0,
         index: str = "bert",

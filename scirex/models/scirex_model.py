@@ -36,13 +36,13 @@ class ScirexModel(Model):
         display_metrics: List[str] = None,
     ) -> None:
         super(ScirexModel, self).__init__(vocab, regularizer)
-
+        
         self._text_field_embedder = text_field_embedder
         self._context_layer = context_layer
         self._lexical_dropout = torch.nn.Dropout(p=lexical_dropout)
 
-        modules = Params(modules)
-
+        modules = Params(modules)#model description about all sicrex end task and not token representation
+        
         self._ner = NERTagger.from_params(vocab=vocab, params=modules.pop("ner"))
         self._saliency_classifier = SpanClassifier.from_params(
             vocab=vocab, params=modules.pop("saliency_classifier")
@@ -82,13 +82,141 @@ class ScirexModel(Model):
         relation_to_cluster_ids=None,
         metadata=None,
     ):
+        print("doc id", metadata[0]["doc_id"])
+
+
         torch.cuda.empty_cache()
-
+        # print(relation_to_cluster_ids, "relation_to_cluster_ids")
+        # print(ner_type_labels.tolist())
+        # 1/0
+        print(text)
+        print("span u 1", ner_type_labels.shape, spans.shape, span_cluster_labels.shape, span_saliency_labels.shape, span_type_labels.shape, span_features.shape, relation_to_cluster_ids.shape)
+        # 1/0
         output_dict = {}
-        loss = 0.0
+        loss = 0.0     
+        output_embedding = self.embedding_forward(text)#output after passing thought bi-lstm layer
+        b, max_len, _ = output_embedding["text"].size()
+        relation_to_cluster_ids = relation_to_cluster_ids.repeat(b,1,1)
+        ner_type_labels_l, span_l, span_cluster_labels_l, span_saliency_labels_l, span_type_labels_l, span_features_l, relation_to_cluster_ids_l= ner_type_labels.tolist()[0], spans.tolist()[0], span_cluster_labels.tolist()[0], span_saliency_labels.tolist()[0], span_type_labels.tolist()[0], span_features.tolist()[0], relation_to_cluster_ids.tolist()[0]
+        #find all the index which overflow in one row
+        new_ner_type_labels, new_span, new_span_cluster_labels, new_span_saliency_labels, new_span_type_labels, new_span_features, new_relation_to_cluster_ids =[], [], [], [], [], [], []
+        t_old, ner_t_old = -1, -1
+        ner_t = -1
+        # print(ner_type_labels_l)
+        # print(span_l)
+        end_with_id = [3,4,6,8,10,12,13,15,0]
+        start = 0
+        list_end = []
+        n = 1
+        temp = 0
+        while(n < len(ner_type_labels_l)):
+            if n%max_len == 0:
+                new_ner_type_labels.append(ner_type_labels_l[start:temp])
+                print(ner_type_labels_l[start], ner_type_labels_l[temp], ner_type_labels_l[n])
+                start = temp
+            if ner_type_labels_l[n] in end_with_id:
+                temp = n
+            n += 1
+        # print(new_ner_type_labels )
+        # 1/0
+        for row_id in range(len(span_l)):
+            t = span_l[row_id][1]//max_len
+            x, y, ner_t = span_l[row_id][0]//max_len, t, max(t, ner_t)
+            if t_old != t:
+                if span_l[row_id][0]-max_len*x > span_l[row_id][1]-max_len*y:
+                    new_span.append([[0, span_l[row_id][1]-max_len*y]])
+                else:
+                    new_span.append([[span_l[row_id][0]-max_len*x, span_l[row_id][1]-max_len*y]])
+                new_span_cluster_labels.append([span_cluster_labels_l[row_id]]), new_span_saliency_labels.append([span_saliency_labels_l[row_id]])
+                new_span_type_labels.append([span_type_labels_l[row_id]]), new_span_features.append([span_features_l[row_id]])
+                # new_relation_to_cluster_ids.append([relation_to_cluster_ids_l[row_id]])
+                # print(new_ner_type_labels, "ttt")
+                # print(0,span_l[row_id][1], "ttt")
 
-        output_embedding = self.embedding_forward(text)
+            else:
+                new_span[t].append([span_l[row_id][0]-max_len*x, span_l[row_id][1]-max_len*y])
+                new_span_cluster_labels[t].append(span_cluster_labels_l[row_id]), new_span_saliency_labels[t].append(span_saliency_labels_l[row_id])
+                new_span_type_labels[t].append(span_type_labels_l[row_id]), new_span_features[t].append(span_features_l[row_id])
+                # print(new_ner_type_labels, "ttt")
+                # print(ner_type_labels_l[span_l[row_id-1][1]:span_l[row_id][1]], span_l[row_id-1][1],span_l[row_id][1], "ttt")
+                # 1/0
 
+                # new_relation_to_cluster_ids[t].append(relation_to_cluster_ids[row_id])
+            # if ner_t_old == -1:
+            #     new_ner_type_labels.append(ner_type_labels_l[:span_l[row_id][1]])
+            # elif ner_t_old != ner_t:
+            #     new_ner_type_labels.append(ner_type_labels_l[span_l[row_id][0]:span_l[row_id][1]])
+            # elif len(new_ner_type_labels[ner_t] + ner_type_labels_l[span_l[row_id-1][1]:span_l[row_id][1]]) > max_len:
+            #     new_ner_type_labels.append(ner_type_labels_l[span_l[row_id-1][1]:span_l[row_id][1]])
+            #     ner_t += 1
+            # else:
+            #     # if [8411, 8413] == span_l[row_id]:
+            #     #     print(span_l[row_id][0], span_l[row_id][1], span_l[row_id-1][0], span_l[row_id-1][1], ner_type_labels_l[span_l[row_id-1][1]:span_l[row_id][1]])
+            #     #     1/0
+            #     new_ner_type_labels[ner_t] += ner_type_labels_l[span_l[row_id-1][1]:span_l[row_id][1]]
+            
+            t_old, ner_t_old = t, ner_t
+        # new_ner_type_labels[-1].append(ner_type_labels_l[span_l[-1][1]])
+        # print(new_span)
+        # print(new_ner_type_labels)
+        # 1/0
+        max_ = -1
+        
+        for batch in new_span:
+            max_ = max(max_, len(batch))
+        new_span_padded = new_span
+        if b > len(new_span_padded):#can be removed
+            for k in range(b - len(new_span_padded)):
+                new_span_padded.append([]), new_span_cluster_labels.append([]), new_span_saliency_labels.append([]), new_span_type_labels.append([]), new_span_features.append([])
+        if b > len(new_ner_type_labels):#can be removed
+            for k in range(b - len(new_ner_type_labels)):
+                new_ner_type_labels.append([])
+            # new_relation_to_cluster_ids.append([])
+        max_ner_labels = -1
+        for i in range(b):
+            max_ner_labels = max(max_ner_labels, len(new_ner_type_labels[i]))
+        for batch_id in range(b):
+            temp = len(new_span[batch_id]) if batch_id < len(new_span) else 0
+            for i in range(max_ - temp):
+                new_span_padded[batch_id].append([-1, -1])
+                new_span_cluster_labels[batch_id].append([0 for k in range(span_cluster_labels.size(-1))]), new_span_saliency_labels[batch_id].append(0)
+                new_span_type_labels[batch_id].append(0), new_span_features[batch_id].append([0 for k in range(span_features.size(-1))])
+                # new_relation_to_cluster_ids[batch_id].append([])
+            
+            print(max_len,len(new_ner_type_labels[batch_id]), batch_id, b, "h")
+            for _ in range(max_len - len(new_ner_type_labels[batch_id])):
+                new_ner_type_labels[batch_id].append(0)
+            print(max_len, len(new_ner_type_labels[batch_id]), batch_id, b, max_len - len(new_ner_type_labels[batch_id]))
+        # print(new_ner_type_labels)
+        # 1/0
+        import numpy as np
+        
+        # print(new_span_cluster_labels, "new_span_cluster_labels")
+        # 1/0
+        # print(torch.Tensor(new_span_padded).shape, "new tensor")
+        # print(np.array(new_span_cluster_labels).shape)
+        # print(np.array(new_span_saliency_labels).shape)
+        # print(np.array(new_span_type_labels).shape)
+        # print(np.array(new_span_features).shape)
+
+        # 1/0
+        # print(np.array(new_ner_type_labels).shape)
+        # 1/0
+        # print(torch.tensor(new_span).shape ,"new span")
+        spans = torch.tensor(new_span_padded, device=output_embedding["text"].device)
+        span_cluster_labels = torch.tensor(new_span_cluster_labels, device=output_embedding["text"].device)
+        span_saliency_labels = torch.tensor(new_span_saliency_labels, device=output_embedding["text"].device)
+        span_type_labels = torch.tensor(new_span_type_labels, device=output_embedding["text"].device)
+        span_features = torch.tensor(new_span_features, device=output_embedding["text"].device)
+        ner_type_labels = torch.tensor(new_ner_type_labels, device=output_embedding["text"].device)
+        # relation_to_cluster_ids = torch.tensor(new_relation_to_cluster_ids, device=output_embedding["text"].device)
+        print("span u 2", ner_type_labels.shape, spans.shape, span_cluster_labels.shape, span_saliency_labels.shape, span_type_labels.shape, span_features.shape, relation_to_cluster_ids.shape)
+        
+        for k in output_embedding.keys():
+            print(k, output_embedding[k].shape, "hey")
+        # 1/0
+        #ner_type_labels.view(-1, ner_type_labels.size(-1))
+        #ner_type_labels = F.pad(ner_type_labels, (0, output_embedding["text"].shape[0]*output_embedding["text"].shape[1] - ner_type_labels.shape[1]), "constant", 0).reshape(output_embedding["text"].shape[:-1])
         if self._loss_weights["ner"] > 0.0:
             output_dict["ner"] = self.ner_forward(output_embedding=output_embedding, ner_type_labels=ner_type_labels, metadata=metadata)
             loss += self._loss_weights["ner"] * output_dict["ner"]["loss"]
@@ -96,7 +224,7 @@ class ScirexModel(Model):
         output_span_embedding = self.span_embeddings_forward(
             output_embedding, spans, span_type_labels, span_features, metadata
         )
-
+        
         if self._loss_weights["saliency"] > 0.0 or self._loss_weights["n_ary_relation"] > 0.0:
             output_dict["saliency"], output_dict["n_ary_relation"] = self.saliency_and_relation_forward(
                 output_span_embedding,
@@ -118,24 +246,39 @@ class ScirexModel(Model):
 
     def embedding_forward(self, text):
         # Shape: (batch_size, max_sentence_length, embedding_size)
+        #text contains all bert related attributes along with tokens
+        print(self._text_field_embedder(text).shape, "before lexical dropout")
         text_embeddings = self._lexical_dropout(self._text_field_embedder(text))
-        text_mask = util.get_text_field_mask(text)
+        for k in text.keys():
+            print(k, text[k].shape)
+        print(text_embeddings.shape, "text_embeddings")
+        #text_embeddings of all tokens
+        text_mask = util.get_text_field_mask(text)#returns a mask with 0 where the tokens are padding, and 1 otherwise
         sentence_lengths = text_mask.sum(-1)
-
-        # Shape: (total_sentence_length, encoding_dim)
+        print(text_mask.shape, sentence_lengths, "text_mask and sentence length")
+        # Shape: (total_sentence_length, encoding_dim=768) total_sentence_length = max_sentence_length*batch_size
         flat_text_embeddings = text_embeddings.view(-1, text_embeddings.size(-1))
         flat_text_mask = text_mask.view(-1).byte()
-
-        filtered_text_embeddings = flat_text_embeddings[flat_text_mask.bool()]
+        print(flat_text_embeddings.shape, "flat_text_embeddings")
+        print(flat_text_mask.shape,"flat_text_mask")
+        print(flat_text_mask.bool().shape, "flat_text_mask.bool()")
+        # Shape: (actual length of document, 768) filtering of zeros
+        filtered_text_embeddings = flat_text_embeddings[flat_text_mask.bool()]#concatenate by considering only one position
+        
+        # Shape: (actual length of document, 400) 
         filtered_contextualized_embeddings = self._context_layer(
             filtered_text_embeddings.unsqueeze(0),
             torch.ones((1, filtered_text_embeddings.size(0)), device=filtered_text_embeddings.device).byte(),
         ).squeeze(0)
 
+        #bi-lstm contextualized_embeddings
+        # Shape: (maximum length of document, 400) 
         flat_contextualized_embeddings = torch.zeros(
             (flat_text_embeddings.size(0), filtered_contextualized_embeddings.size(1)),
             device=filtered_text_embeddings.device,
         )
+
+        # Shape: (maximum length of document, 400) 
         flat_contextualized_embeddings.masked_scatter_(
             flat_text_mask.unsqueeze(-1).bool(), filtered_contextualized_embeddings
         )
@@ -144,11 +287,12 @@ class ScirexModel(Model):
         contextualized_embeddings = flat_contextualized_embeddings.reshape(
             (text_embeddings.size(0), text_embeddings.size(1), flat_contextualized_embeddings.size(-1))
         )
-
+        # print(contextualized_embeddings.shape, "contextualized_embeddings ")
+        # 1/0
         output_embedding = {
             "contextualised": contextualized_embeddings,
             "text": text_embeddings,
-            "mask": text_mask,
+            "mask": text_mask.reshape(text_embeddings.shape[:-1]),
             "lengths": sentence_lengths,
         }
         return output_embedding
@@ -181,7 +325,7 @@ class ScirexModel(Model):
                 span_type_labels_one_hot = self.get_span_one_hot_labels(
                     "span_type_labels", span_type_labels, spans
                 )
-
+                print(span_position.shape, span_type_labels.shape, span_type_labels_one_hot.shape, span_features.float().shape, span_offset.shape, "here**")
                 span_features = torch.cat(
                     [span_position, span_type_labels_one_hot, span_features.float()], dim=-1
                 )
@@ -323,11 +467,13 @@ class ScirexModel(Model):
         start_pos_in_doc = torch.LongTensor([x["start_pos_in_doc"] for x in metadata]).to(
             spans.device
         )  # (B,)
+
         para_offset = start_pos_in_doc.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
         span_offset = spans + (para_offset * span_mask.unsqueeze(-1).long())
         return span_offset
 
     def extract_span_embeddings(self, contextualized_embeddings, spans):
+        print(contextualized_embeddings.shape, spans.shape, "at extract span embeddings")
         attended_span_embeddings = self._attentive_span_extractor(contextualized_embeddings, spans)
         span_mask = (spans[:, :, 0] >= 0).long()
         spans = F.relu(spans.float()).long()
@@ -411,7 +557,7 @@ class ScirexModel(Model):
             + list(metrics_n_ary.items())
             + list(metrics_loss.items())
         )
-
+        
         all_metrics["validation_metric"] = (
             self._loss_weights["ner"] * nan_to_zero(metrics_ner.get("ner_f1-measure", 0))
             + self._loss_weights["saliency"] * nan_to_zero(metrics_saliency.get("span_f1", 0))

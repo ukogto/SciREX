@@ -1,6 +1,10 @@
+import torch, random
 import json
 from collections import OrderedDict
 from typing import Any, Dict, List, Set, Tuple
+from scirex.models.longformer.create_pretraining_data import create_training_data_from_instance, create_instances_from_document, create_training_data_from_instance_end_task
+from scirex.models.longformer import tokenization
+# from inspect import signature
 
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
 from allennlp.data.fields import (
@@ -131,15 +135,30 @@ class ScirexFullReader(DatasetReader):
         self._token_indexers = token_indexers
         self._max_paragraph_length = max_paragraph_length
         self.prediction_mode = False
-
+        
         ## Hack so I can reuse same reader to convert scirex
         ## format to scierc format
         self.to_scierc_converter = to_scirex_converter
+        ################ lf ######################
+        self.rng = random.Random(29)
+        self.tokenizer = tokenization.FullTokenizer(vocab_file='longformer_weights/vocab.json', do_lower_case=True)
+        self.example = None
+        # f1sig = signature(create_instances_from_document).parameters.keys()
+        # f2sig = signature(create_training_data_from_instance).parameters.keys()
+        # self.f1inps = {k:self.args[k] for k in f1sig if k not in ['document', 'tokenizer', 'rng']}
+        # self.f2inps = {k:self.args[k] for k in f2sig if k not in ['doc', 'tokenizer', 'rng']}
+        # self.f2inps.update({'tokenizer': self.tokenizer})
 
     @overrides
     def _read(self, file_path: str):
+        lf_dataset = torch.load(file_path.split(".")[0]+"_lf.pkl")
+        # lf_json_dict = []
+        # with open(file_path.split(".")[0]+"_lf.jsonl", "r") as lf:
+        #     for _, line in enumerate(lf):
+        #         lf_json_dict.append(json.loads(line))
+        # print(lf_dataset[0]), 1/0
         with open(file_path, "r") as g:
-            for _, line in enumerate(g):
+            for line_no, line in enumerate(g):
                 json_dict = json.loads(line)
                 if self.prediction_mode:
                     if "method_subrelations" in json_dict:
@@ -151,6 +170,8 @@ class ScirexFullReader(DatasetReader):
 
                 # Get fields from JSON dict
                 doc_id = json_dict["doc_id"]
+                # if doc_id not in ["424561d8585ff8ebce7d5d07de8dbf7aae5e7270", "007ff2ca5f297b04636699ce4d01ca6d6f21dc77", "02567fd428a675ca91a0c6786f47f3e35881bcbd"]:# and file_path[-7] == "n":
+                #     continue
                 sections: List[Span] = json_dict["sections"]
                 sentences: List[List[Span]] = json_dict["sentences"]
                 words: List[str] = json_dict["words"]
@@ -222,23 +243,44 @@ class ScirexFullReader(DatasetReader):
                 }
 
                 # Loop over the sections.
+                paragraph, ner_dict_, sentences_ = None, None, None
                 for (paragraph_num, ((start_ix, end_ix), sentences, ner_dict)) in enumerate(
                     zip(sections, sentences_grouped, entities_grouped)
-                ):
-                    paragraph = words[start_ix:end_ix]
+                ):  
+                    if paragraph == None:
+                        paragraph = words[start_ix:end_ix]
+                    else:
+                        paragraph += words[start_ix:end_ix]
+                    if ner_dict_ == None:
+                        ner_dict_ = ner_dict
+                    else:
+                        ner_dict_ = {**ner_dict_, **ner_dict}
+                    if sentences_ == None:
+                        sentences_ = sentences
+                    else:
+                        sentences_.append(sentences)
+                                        
                     if len(paragraph) == 0:
                         breakpoint()
-
-                    instance = self.text_to_instance(
-                        paragraph_num=paragraph_num,
-                        paragraph=paragraph,
-                        ner_dict=ner_dict,
-                        start_ix=start_ix,
-                        end_ix=end_ix,
-                        sentence_indices=sentences,
-                        document_metadata=document_metadata,
-                    )
-                    yield instance
+                # print(paragraph_num, paragraph, ner_dict_, start_ix, end_ix, sentences, len(paragraph),"\n**************")
+                jugad = line_no%95
+                example = [create_training_data_from_instance_end_task(lf_dataset[jugad],attention_window=256,max_seq_length=4094,masked_node_prob=0.5,max_masked_nodes=5,masked_lm_prob=0.15,
+                                                                max_num_headers=10,max_tokens_per_header=30,max_predictions_per_seq=20,tokenizer=self.tokenizer, rng=self.rng).__dict__]#here
+                document_metadata["lf_inputs"] = example
+                # print(examples)
+                instance = self.text_to_instance(
+                    paragraph_num=0,
+                    paragraph=paragraph,
+                    ner_dict=ner_dict_,
+                    start_ix=0,
+                    end_ix=len(paragraph),
+                    sentence_indices=sentences_,
+                    # lf_inputs=example,#here
+                    document_metadata=document_metadata,
+                )
+                yield instance
+                
+                
 
     def resize_sections_and_group(
         self, sections: List[Span], sentences: List[List[Span]], entities: Dict[Span, EntityType]
@@ -296,7 +338,7 @@ class ScirexFullReader(DatasetReader):
             sections.append(p)
             entities_grouped.append(e)
             sentences_grouped.append(s)
-
+        
         return sections, sentences_grouped, entities_grouped
 
     def text_to_instance(
@@ -307,22 +349,24 @@ class ScirexFullReader(DatasetReader):
         start_ix: int,
         end_ix: int,
         sentence_indices: List[Span],
+        # lf_inputs: List[Any],
         document_metadata: Dict[str, Any],
     ):
 
         if self.to_scierc_converter:
             return dict(
-                paragraph_num=paragraph_num,
+                #paragraph_num=paragraph_num,
                 paragraph=paragraph,
                 ner_dict=ner_dict,
                 start_ix=start_ix,
                 end_ix=end_ix,
                 sentence_indices=sentence_indices,
+                # lf_inputs=lf_inputs,
                 document_metadata=document_metadata,
             )
 
         text_field = TextField([Token(word) for word in paragraph], self._token_indexers)
-
+        
         metadata_field = MetadataField(
             dict(
                 doc_id=document_metadata["doc_id"],
@@ -332,19 +376,21 @@ class ScirexFullReader(DatasetReader):
                 end_pos_in_doc=end_ix,
                 ner_dict=ner_dict,
                 sentence_indices=sentence_indices,
+                # lf_inputs=lf_inputs,
                 document_metadata=document_metadata,
                 num_spans=len(ner_dict),
             )
         )
-
+        # for k, v in ner_dict.items():
+        #     print(k[0] - start_ix, k[1] - start_ix, v[0], len(paragraph))
         ner_type_labels = spans_to_bio_tags(
             [(k[0] - start_ix, k[1] - start_ix, v[0]) for k, v in ner_dict.items()], len(paragraph)
         )
-
+        
         ner_entity_field = SequenceLabelField(ner_type_labels, text_field, label_namespace="ner_type_labels")
-
+        
         # Pull it  all together.
-        fields = dict(text=text_field, ner_type_labels=ner_entity_field, metadata=metadata_field)
+        fields = dict(text=text_field, ner_type_labels=ner_entity_field, metadata=metadata_field)#lf_inputs=lf_inputs
 
         spans = []
         span_cluster_labels = []
@@ -372,7 +418,7 @@ class ScirexFullReader(DatasetReader):
             span_features.append(
                 MultiLabelField(entities_to_features_map[(s, e)], label_namespace="section_feature_labels", num_labels=5)
             )
-
+        
         if len(spans) > 0:
             fields["spans"] = ListField(spans)
             fields["span_cluster_labels"] = ListField(span_cluster_labels)
@@ -404,7 +450,6 @@ class ScirexFullReader(DatasetReader):
             fields["span_features"] = ListField(
                 [MultiLabelField([], label_namespace="section_feature_labels", num_labels=5)]
             )
-
         if len(relation_to_cluster_ids) > 0:
             fields["relation_to_cluster_ids"] = ListField(
                 [
@@ -417,5 +462,7 @@ class ScirexFullReader(DatasetReader):
                     for k, v in relation_to_cluster_ids.items()
                 ]
             )
-
+        # for i in fields:
+        #     print(i, fields[i])
+        # 1/0
         return Instance(fields)

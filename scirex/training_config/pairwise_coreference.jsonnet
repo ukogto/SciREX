@@ -2,24 +2,24 @@
   dataset_reader: {
     type: "scirex_coreference_train_reader",
     token_indexers: {
-      bert: {
-        type: "bert-pretrained",
-        pretrained_model: std.extVar("BERT_VOCAB"),
+      longformer: {
+        type: "longformer-pretrained",
+        pretrained_model: std.extVar("LONGFORMER_VOCAB"),
         do_lowercase: std.extVar("IS_LOWERCASE"),
         truncate_long_sequences : false
       }
     },
     tokenizer: {
-       "word_splitter": "bert-basic"
+       "word_splitter": "longformer-basic"
     }
   },
   train_data_path: std.extVar("TRAIN_PATH"),
   validation_data_path: std.extVar("DEV_PATH"),
   test_data_path: std.extVar("TEST_PATH"),
   model: {
-    type: "bert_coreference",
-    bert_model: {
-        pretrained_model: std.extVar("BERT_WEIGHTS"),
+    type: "longformer_coreference",
+    longformer_model: {
+        pretrained_model: std.extVar("LONGFORMER_WEIGHTS"),
         requires_grad : "pooler,10,11"
     },
     aggregate_feedforward: {

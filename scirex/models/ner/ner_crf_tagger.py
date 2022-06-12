@@ -31,8 +31,7 @@ class NERTagger(Model):
         self._n_labels = vocab.get_vocab_size(label_namespace)
 
         self.label_map = self.vocab.get_index_to_token_vocabulary(label_namespace)
-        print(self.label_map)
-
+        
         self._mention_feedforward = TimeDistributed(mention_feedforward)
 
         self._ner_scorer = TimeDistributed(
@@ -62,19 +61,23 @@ class NERTagger(Model):
         ner_labels: torch.IntTensor = None,
         metadata: List[Dict[str, Any]] = None,
     ) -> Dict[str, torch.Tensor]:
-
+        
         # Shape: (Batch_size, Number of spans, H)
+        print(text_embeddings.shape)
         span_feedforward = self._mention_feedforward(text_embeddings)
         ner_scores = self._ner_scorer(span_feedforward)
+        print(ner_labels.shape, text_mask.shape, "ner tagger", ner_scores.shape, span_feedforward.shape)
         predicted_ner = self._ner_crf.viterbi_tags(ner_scores, text_mask)
-
+        # print(predicted_ner)
         predicted_ner = [x for x, y in predicted_ner]
+        print(ner_labels.shape, text_mask.shape, "ner tagger")
         gold_ner = [list(x[m.bool()].detach().cpu().numpy()) for x, m in zip(ner_labels, text_mask)]
 
         output = {"logits": ner_scores, "tags": predicted_ner, "gold_tags": gold_ner}
 
         if ner_labels is not None:
             # Add negative log-likelihood as loss
+            print("shape ner", ner_scores.shape, ner_labels.shape, text_mask.shape)
             log_likelihood = self._ner_crf(ner_scores, ner_labels, text_mask)
             output["loss"] = -log_likelihood / text_embeddings.shape[0]
 
@@ -86,7 +89,7 @@ class NERTagger(Model):
                     if i >= ner_scores.shape[0] or j >= ner_scores.shape[1] or tag_id >= ner_scores.shape[2]:
                         breakpoint()
                     class_probabilities[i, j, tag_id] = 1
-
+            print(class_probabilities.shape, ner_labels, ner_labels.shape, text_mask.shape, "here***")
             self._ner_metrics(class_probabilities, ner_labels, text_mask.float())
 
         if metadata is not None:

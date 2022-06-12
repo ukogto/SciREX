@@ -6,7 +6,7 @@ local template = import "template_full.libsonnet";
 
 local params = {
   use_lstm: true,
-  bert_fine_tune: std.extVar("bert_fine_tune"),
+  longformer_fine_tune: std.extVar("longformer_fine_tune"),
   loss_weights: {          // Loss weights for the modules.
     ner: std.extVar('nw'),
     saliency: std.extVar('lw'),
